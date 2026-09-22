@@ -1,0 +1,19 @@
+{
+  "name": "autoheal-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stateless API used to demonstrate Kubernetes self-healing and autoscaling",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "prom-client": "^15.1.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}
