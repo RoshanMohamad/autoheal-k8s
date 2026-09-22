@@ -1,0 +1,56 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: autoheal-api-rules
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: autoheal-api.rules
+      rules:
+        - alert: AutohealPodCrashLooping
+          expr: |
+            increase(kube_pod_container_status_restarts_total{container="autoheal-api"}[10m]) > 2
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            description: "{{ $labels.pod }} has restarted more than twice in 10 minutes."
+
+        - alert: AutohealHPAAtMaxReplicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler=~".*autoheal-api"}
+              >= kube_horizontalpodautoscaler_spec_max_replicas{horizontalpodautoscaler=~".*autoheal-api"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HPA pinned at max replicas"
+            description: "The autoheal-api HPA has been at its maximum replica count for over 10 minutes; capacity may be insufficient."
+
+        - alert: AutohealHighErrorRate
+          expr: |
+            sum(rate(http_request_duration_seconds_count{job="autoheal-api",status_code=~"5.."}[2m]))
+              /
+            sum(rate(http_request_duration_seconds_count{job="autoheal-api"}[2m]))
+              > 0.05
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Error rate above 5%"
+            description: "More than 5% of autoheal-api requests have returned 5xx for over 2 minutes."
+
+        - alert: AutohealAvailableReplicasBelowPDB
+          expr: |
+            kube_poddisruptionbudget_status_expected_pods{poddisruptionbudget=~".*autoheal-api"}
+              - kube_poddisruptionbudget_status_current_healthy{poddisruptionbudget=~".*autoheal-api"}
+              > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Healthy replicas below PDB minimum"
+            description: "Fewer healthy autoheal-api pods than the PodDisruptionBudget requires."

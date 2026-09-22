@@ -1,5 +1,21 @@
 replicaCount: 2
 
+# maxUnavailable: 0 means a new pod must pass its readiness probe before an old
+# one is removed, which is what keeps rollouts at zero failed requests.
+strategy:
+  maxUnavailable: 0
+  maxSurge: 1
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Soft (preferred) rather than hard: kind has 2 workers but the HPA scales to 8,
+# so a hard rule would leave pods permanently Pending once replicas exceed nodes.
+podAntiAffinity:
+  enabled: true
+  type: preferred
+
 image:
   repository: autoheal-api
   tag: dev
@@ -30,6 +46,15 @@ env:
   MAX_HANG_MS: "30000"
   MAX_WORK_MS: "5000"
   MAX_UNREADY_SECONDS: "300"
+
+serviceMonitor:
+  enabled: false
+  interval: 15s
+  scrapeTimeout: 10s
+  # kube-prometheus-stack only discovers ServiceMonitors carrying its release
+  # label, so this must match the release name used to install that chart.
+  labels:
+    release: monitoring
 
 probes:
   startup:

@@ -6,6 +6,11 @@ metadata:
     {{- include "autoheal-api.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.strategy.maxUnavailable }}
+      maxSurge: {{ .Values.strategy.maxSurge }}
   selector:
     matchLabels:
       {{- include "autoheal-api.selectorLabels" . | nindent 6 }}
@@ -14,6 +19,25 @@ spec:
       labels:
         {{- include "autoheal-api.selectorLabels" . | nindent 8 }}
     spec:
+      {{- if .Values.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.podAntiAffinity.type "required" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "autoheal-api.selectorLabels" . | nindent 18 }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "autoheal-api.selectorLabels" . | nindent 20 }}
+          {{- end }}
+      {{- end }}
       containers:
         - name: {{ include "autoheal-api.name" . }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

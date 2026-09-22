@@ -41,6 +41,48 @@ helm install autoheal helm/autoheal-api
 curl -H "Host: autoheal.local" http://localhost:8080/healthz
 ```
 
+## Observability (Week 3)
+
+Run these once the cluster from the previous section is up. The values file trims
+retention and resources so the stack fits alongside kind on a laptop.
+
+```bash
+# 1. Install the monitoring stack (release name must be "monitoring": the chart
+#    only discovers ServiceMonitors/PrometheusRules labelled release=monitoring)
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  -n monitoring --create-namespace \
+  -f observability/values-kube-prometheus-stack.yaml
+
+# 2. Point Prometheus at the app
+helm upgrade autoheal helm/autoheal-api --set serviceMonitor.enabled=true
+
+# 3. Load the dashboard (the Grafana sidecar watches for this label)
+kubectl create configmap autoheal-dashboard \
+  -n monitoring --from-file=observability/grafana-dashboard.json
+kubectl label configmap autoheal-dashboard -n monitoring grafana_dashboard=1
+
+# 4. Load the alert rules
+kubectl apply -f observability/alert-rules.yaml
+
+# 5. Open Grafana (admin / admin) and Prometheus
+kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
+kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090
+```
+
+Verify the app is actually being scraped at Prometheus → Status → Targets, or:
+
+```bash
+curl -s 'http://localhost:9090/api/v1/query?query=up{job="autoheal-api"}'
+```
+
+| File | Purpose |
+|---|---|
+| [observability/values-kube-prometheus-stack.yaml](observability/values-kube-prometheus-stack.yaml) | Slimmed stack config for kind |
+| [observability/grafana-dashboard.json](observability/grafana-dashboard.json) | Dashboard: RED metrics, replicas, HPA, restarts, readiness, nodes |
+| [observability/alert-rules.yaml](observability/alert-rules.yaml) | Crash-loop, HPA-at-max, error-rate and PDB alerts |
+
 ## Endpoints
 
 | Path | Purpose |
