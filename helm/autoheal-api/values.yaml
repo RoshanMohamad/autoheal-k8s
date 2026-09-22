@@ -10,11 +10,16 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
-# Soft (preferred) rather than hard: kind has 2 workers but the HPA scales to 8,
-# so a hard rule would leave pods permanently Pending once replicas exceed nodes.
-podAntiAffinity:
+# Spreads replicas across nodes. topologySpreadConstraints is used rather than
+# preferred podAntiAffinity because the latter is only a scheduler hint that
+# node-resource scoring routinely outweighs - in testing it placed both replicas
+# on a single node, which is exactly what this is supposed to prevent.
+# whenUnsatisfiable: ScheduleAnyway keeps the HPA able to scale past the node
+# count; DoNotSchedule would leave pods Pending once replicas exceed nodes.
+topologySpread:
   enabled: true
-  type: preferred
+  maxSkew: 1
+  whenUnsatisfiable: ScheduleAnyway
 
 image:
   repository: autoheal-api
@@ -43,7 +48,10 @@ resources:
 env:
   PORT: "3000"
   STARTUP_DELAY_MS: "2000"
-  MAX_HANG_MS: "30000"
+  # Must exceed livenessProbe periodSeconds x failureThreshold (10 x 3 = 30s)
+  # with margin, or /hang gets clamped to almost exactly the probe budget and
+  # the third failure races the end of the hang.
+  MAX_HANG_MS: "60000"
   MAX_WORK_MS: "5000"
   MAX_UNREADY_SECONDS: "300"
 

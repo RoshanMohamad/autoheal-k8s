@@ -83,6 +83,32 @@ curl -s 'http://localhost:9090/api/v1/query?query=up{job="autoheal-api"}'
 | [observability/grafana-dashboard.json](observability/grafana-dashboard.json) | Dashboard: RED metrics, replicas, HPA, restarts, readiness, nodes |
 | [observability/alert-rules.yaml](observability/alert-rules.yaml) | Crash-loop, HPA-at-max, error-rate and PDB alerts |
 
+## Chaos scenarios (Week 4)
+
+Each script asserts a pass condition and exits non-zero on failure. Measured
+results are in [docs/test-report.md](docs/test-report.md).
+
+```bash
+make chaos-pod      # T1: delete a pod, expect recovery under 30s
+make chaos-crash    # T2: /crash, expect in-place container restart
+make chaos-hang     # T3: /hang, expect liveness to restart it
+make chaos-unready  # T4: /ready 503, expect endpoint removal without restart
+make chaos-rollout  # T7: readiness never passes, expect stalled rollout + undo
+make chaos-drain    # T8: drain a node, expect the PDB to hold
+make chaos-all      # everything, with a results table
+```
+
+Resilience settings live in [helm/autoheal-api/values.yaml](helm/autoheal-api/values.yaml):
+`maxUnavailable: 0` (a new pod must be Ready before an old one goes), a
+PodDisruptionBudget with `minAvailable: 1`, and `topologySpreadConstraints` to
+spread replicas across nodes.
+
+Spreading uses `topologySpreadConstraints` rather than preferred
+`podAntiAffinity`: the latter is only a scheduler hint, and in testing it placed
+both replicas on the same node — the exact failure it was meant to prevent.
+`whenUnsatisfiable: ScheduleAnyway` is deliberate, so the HPA can still scale to
+8 replicas on a 2-worker cluster instead of leaving pods Pending.
+
 ## Endpoints
 
 | Path | Purpose |

@@ -19,24 +19,14 @@ spec:
       labels:
         {{- include "autoheal-api.selectorLabels" . | nindent 8 }}
     spec:
-      {{- if .Values.podAntiAffinity.enabled }}
-      affinity:
-        podAntiAffinity:
-          {{- if eq .Values.podAntiAffinity.type "required" }}
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - topologyKey: kubernetes.io/hostname
-              labelSelector:
-                matchLabels:
-                  {{- include "autoheal-api.selectorLabels" . | nindent 18 }}
-          {{- else }}
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                topologyKey: kubernetes.io/hostname
-                labelSelector:
-                  matchLabels:
-                    {{- include "autoheal-api.selectorLabels" . | nindent 20 }}
-          {{- end }}
+      {{- if .Values.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpread.maxSkew }}
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: {{ .Values.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "autoheal-api.selectorLabels" . | nindent 14 }}
       {{- end }}
       containers:
         - name: {{ include "autoheal-api.name" . }}
