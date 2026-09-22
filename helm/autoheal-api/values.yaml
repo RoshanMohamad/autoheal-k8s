@@ -1,0 +1,50 @@
+replicaCount: 2
+
+image:
+  repository: autoheal-api
+  tag: dev
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: nginx
+  host: autoheal.local
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 300m
+    memory: 128Mi
+
+env:
+  PORT: "3000"
+  STARTUP_DELAY_MS: "2000"
+  MAX_HANG_MS: "30000"
+  MAX_WORK_MS: "5000"
+  MAX_UNREADY_SECONDS: "300"
+
+probes:
+  startup:
+    path: /startupz
+    periodSeconds: 2
+    failureThreshold: 15
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /ready
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
