@@ -27,6 +27,12 @@ restart_total() {
     awk '{s+=$1} END {print s+0}'
 }
 
+# "yes" once at least $1 pods are Ready. For recovery checks, where an HPA
+# scale-out during the scenario must not turn "capacity restored" into a failure.
+ready_at_least() {
+  [ "$(ready_count)" -ge "$1" ] && echo yes || echo no
+}
+
 endpoint_count() {
   kc get endpoints "$DEPLOY" \
     -o jsonpath='{.subsets[0].addresses[*].ip}' 2>/dev/null | wc -w | tr -d ' '
@@ -102,9 +108,10 @@ settle() {
 
 # Background traffic: steady k6 load through the ingress while a scenario runs,
 # so its impact is measured in failed user requests, not just pod counts.
-# RATE is kept low enough that 2 replicas stay under the HPA target, so the
-# autoscaler does not change the replica count underneath a chaos scenario.
-BG_RATE="${BG_RATE:-20}"
+# RATE is kept low enough that ONE replica stays under the HPA target: several
+# scenarios take a pod out, and at 20 req/s the survivor crossed 60% of its
+# 100m request and the HPA scaled out mid-scenario.
+BG_RATE="${BG_RATE:-10}"
 BG_WORK_MS="${BG_WORK_MS:-2}"
 BG_NAME="autoheal-bg-load"
 

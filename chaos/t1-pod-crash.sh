@@ -15,7 +15,7 @@ info "deleting pod $VICTIM"
 
 kc delete pod "$VICTIM" --wait=false >/dev/null
 
-ELAPSED=$(wait_for "$DEADLINE" "$BEFORE" ready_count)
+ELAPSED=$(wait_for "$DEADLINE" yes ready_at_least "$BEFORE")
 
 echo
 kc get pods -l "$APP_SELECTOR"

@@ -49,7 +49,7 @@ kill "$HANG_PID" 2>/dev/null
 info "liveness killed the hung container after ${ELAPSED}s"
 kc describe pod "$TARGET" 2>/dev/null | grep -i "liveness probe failed" | tail -2
 
-READY_ELAPSED=$(wait_for "$DEADLINE" "$BEFORE_READY" ready_count)
+READY_ELAPSED=$(wait_for "$DEADLINE" yes ready_at_least "$BEFORE_READY")
 
 echo
 kc get pods -l "$APP_SELECTOR"
