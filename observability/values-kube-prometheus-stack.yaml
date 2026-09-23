@@ -32,6 +32,13 @@ alertmanager:
 grafana:
   adminPassword: admin
   defaultDashboardsTimezone: browser
+  # Read-only anonymous access so observability/snapshot.sh can screenshot
+  # dashboards with a headless browser. Local cluster only - Grafana is never
+  # exposed beyond a port-forward.
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
   resources:
     requests:
       cpu: 50m

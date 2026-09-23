@@ -1,4 +1,34 @@
+# Ignored while autoscaling.enabled is true: the HPA owns the replica count, and
+# rendering spec.replicas would make every `helm upgrade` reset it mid-scale.
 replicaCount: 2
+
+# HorizontalPodAutoscaler (autoscaling/v2). Utilisation is measured against
+# resources.requests.cpu, so the requests below are what "60%" means.
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 60
+  behavior:
+    # Double at most every 60s: 2 -> 4 -> 8 reaches max within ~2 minutes of
+    # CPU crossing the target. No stabilisation window on the way up.
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+    # The 300s window makes the HPA act on the highest recommendation of the last
+    # 5 minutes, so a brief dip in load cannot trigger scale-in (anti-flapping).
+    # Then halve at most every 60s: 8 -> 4 -> 2.
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
 
 # maxUnavailable: 0 means a new pod must pass its readiness probe before an old
 # one is removed, which is what keeps rollouts at zero failed requests.

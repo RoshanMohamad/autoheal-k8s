@@ -100,6 +100,37 @@ settle() {
   done
 }
 
+# Background traffic: steady k6 load through the ingress while a scenario runs,
+# so its impact is measured in failed user requests, not just pod counts.
+# RATE is kept low enough that 2 replicas stay under the HPA target, so the
+# autoscaler does not change the replica count underneath a chaos scenario.
+BG_RATE="${BG_RATE:-20}"
+BG_WORK_MS="${BG_WORK_MS:-2}"
+BG_NAME="autoheal-bg-load"
+
+bg_load_start() {
+  BG_LOG="$1"
+  docker rm -f "$BG_NAME" >/dev/null 2>&1
+  RATE="$BG_RATE" WORK_MS="$BG_WORK_MS" DURATION=30m K6_NAME="$BG_NAME" \
+    bash ../load/k6.sh ../load/steady.js >"$BG_LOG" 2>&1 &
+  BG_PID=$!
+  # Let k6 reach its steady rate before the scenario injects anything.
+  sleep 10
+}
+
+# Stops the load and prints "requests failed" from its summary.
+bg_load_stop() {
+  if command -v k6 >/dev/null 2>&1; then
+    kill -INT "$BG_PID" 2>/dev/null
+  else
+    docker stop -t 30 "$BG_NAME" >/dev/null 2>&1
+  fi
+  wait "$BG_PID" 2>/dev/null
+  printf '%s %s\n' \
+    "$(sed -n 's/^RESULT requests=//p' "$BG_LOG" | tail -n 1)" \
+    "$(sed -n 's/^RESULT failed=//p' "$BG_LOG" | tail -n 1)"
+}
+
 require_ready() {
   local want="${1:-2}"
   local have

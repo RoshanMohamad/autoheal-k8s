@@ -79,9 +79,36 @@ suite was run repeatedly — a reminder that a single green run proves little.
   3 samples were captured. The minimum observed equalled the PDB floor rather than proving a
   sub-2-second dip never occurred. A longer drain (more replicas, or a slower `terminationGracePeriod`)
   would give stronger evidence.
-- **T5/T6 (autoscaling) are out of scope for this phase** — they require Metrics Server and the HPA,
-  which land in Week 5.
+- **T5/T6 (autoscaling)** are Week 5; see the section below.
 - **Availability during chaos was not measured as an SLI here.** These runs assert control-plane
   behaviour (replica counts, endpoints, restarts), not request-level success rate. The 99.5%
   availability figure needs k6 driving background traffic (Week 5) plus the Prometheus SLI query
   already written in [../observability/grafana-dashboard.json](../observability/grafana-dashboard.json).
+
+---
+
+# Autoscaling Test Report — Week 5
+
+Environment: as above, plus metrics-server (`--kubelet-insecure-tls`) and the
+`autoscaling/v2` HPA: min 2, max 8, target 60% CPU of the 100m request,
+scale-up +100%/60s, scale-down 300s window then −50%/60s.
+
+Reproduce with `make metrics-server && make deploy && make load-spike`. The script
+writes a per-5s timeline (replicas, desired, CPU%, ready) and the k6 log to
+`load/results/`.
+
+## Results
+
+| # | Scenario | Expected | Observed | Result |
+|---|---|---|---|---|
+| T5 | Traffic spike (k6 10 → 500 VUs over 5 min on `/work`, 3 min hold) | 2 → 4 → 8 within 180s of CPU > 60%; availability ≥ 99.5%; p95 recovers | _not yet run_ | — |
+| T6 | Load ends | Back to 2 within 600s, no flapping | _not yet run_ | — |
+
+## Objectives to be evidenced
+
+- **O4** (scale out under load): T5 scale-up time, measured from the first HPA
+  sample with CPU above target to `currentReplicas == 8`.
+- **O5** (scale in without flapping): T6 time from k6 exit to 2 replicas; any
+  rise in the replica count after it has started falling counts as a flap.
+- **Availability SLI**: k6's `http_req_failed` rate over the whole spike, which
+  is request-level evidence that the chaos runs above did not collect.
