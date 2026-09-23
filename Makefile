@@ -1,6 +1,6 @@
 .PHONY: help build test image cluster cluster-down load deploy undeploy \
         chaos-pod chaos-crash chaos-hang chaos-unready chaos-rollout chaos-drain chaos-all \
-        metrics-server load-spike load-steady status logs
+        metrics-server load-spike load-steady gke-up gke-down chaos-ca status logs
 
 CLUSTER ?= autoheal
 RELEASE ?= autoheal
@@ -27,6 +27,11 @@ help:
 	@echo "  make metrics-server - install metrics-server (needed by the HPA)"
 	@echo "  make load-spike    - T5+T6: k6 spike, expect 2 -> 8 -> 2 replicas"
 	@echo "  make load-steady   - steady k6 background traffic (RATE, DURATION)"
+	@echo ""
+	@echo "Cloud (GKE, costs money):"
+	@echo "  make gke-up        - terraform cluster + deploy everything (PROJECT_ID=...)"
+	@echo "  make chaos-ca      - T9: exhaust capacity, expect Cluster Autoscaler to add a node"
+	@echo "  make gke-down      - tear it all down (PROJECT_ID=...)"
 	@echo ""
 	@echo "  make status        - show pods, endpoints, PDB"
 
@@ -81,6 +86,15 @@ load-spike:
 
 load-steady:
 	@bash load/k6.sh load/steady.js
+
+gke-up:
+	@bash infra/gke/up.sh
+
+gke-down:
+	@bash infra/gke/down.sh
+
+chaos-ca:
+	@bash chaos/t9-cluster-autoscaler.sh
 
 status:
 	@kubectl get pods -l app.kubernetes.io/name=autoheal-api -o wide

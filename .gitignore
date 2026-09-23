@@ -6,3 +6,6 @@ coverage/
 .DS_Store
 claude.md
 load/results/
+.terraform/
+*.tfstate
+*.tfstate.*

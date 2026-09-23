@@ -38,8 +38,10 @@ for s in $SCENARIOS; do
   RESULTS="${RESULTS}\n  ${s}\t${R}\t${REQS}\t${FAILS}\t${AVAIL}"
 
   # Wait for genuine quiescence rather than a fixed sleep, so one scenario's
-  # tail (a container still restarting) cannot fail the next one.
-  if ! settle 2 180; then
+  # tail (a container still restarting) cannot fail the next one. The timeout
+  # covers the HPA's 300s scale-down window: T3's busy-looping /hang reads as
+  # high CPU and scales the app out, and 180s was not enough to get back to 2.
+  if ! settle 2 "${SETTLE_TIMEOUT:-480}"; then
     info "warning: cluster did not fully settle before the next scenario"
   fi
 done

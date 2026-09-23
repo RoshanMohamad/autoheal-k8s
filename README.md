@@ -98,8 +98,8 @@ make chaos-drain    # T8: drain a node, expect the PDB to hold
 make chaos-all      # everything, with a results table
 ```
 
-`make chaos-all` runs each scenario under steady k6 background traffic (20 req/s,
-kept low so the HPA does not scale mid-scenario) and reports failed user
+`make chaos-all` runs each scenario under steady k6 background traffic (10 req/s,
+kept low enough that one pod can carry it, so the HPA does not scale mid-scenario) and reports failed user
 requests per scenario alongside PASS/FAIL. `LOAD=0` turns the traffic off.
 Tune it with `BG_RATE` and `BG_WORK_MS`.
 
@@ -178,6 +178,60 @@ costing `WORK_MS` of CPU. The defaults (500 VUs, 10 ms, 3 s) produce roughly 1.7
 cores of work. That saturates 2 pods (0.6 cores of limits) but fits within 8
 (2.4 cores), so p95 latency should recover once the app has scaled out. On a
 smaller laptop, lower `PEAK_VUS`.
+
+## Cloud: GKE and the Cluster Autoscaler (Week 6)
+
+This part **costs money** from `gke-up` until `gke-down`. Run it in one sitting.
+
+One-time setup:
+
+```bash
+# Install the Google Cloud CLI: https://cloud.google.com/sdk/docs/install
+gcloud components install gke-gcloud-auth-plugin
+gcloud auth login
+gcloud auth application-default login      # credentials Terraform uses
+gcloud config set project <PROJECT_ID>     # a project with billing enabled
+```
+
+Run:
+
+```bash
+# Cluster (zonal, 2-4 x e2-standard-2), registry, image push, ingress-nginx,
+# monitoring stack, app. Add BILLING_ACCOUNT=... to also create a $10 budget
+# with email alerts at 50/90/100%.
+PROJECT_ID=<PROJECT_ID> make gke-up
+
+# Point k6 at the cloud load balancer (up.sh prints the IP)
+export BASE_URL=http://<LB_IP> K6_NETWORK=bridge
+
+make chaos-ca       # T9: pods Pending -> Cluster Autoscaler adds a node
+make load-spike     # T5/T6 on real nodes
+make chaos-all      # T1-T8, now with the monitoring stack running
+
+# Grafana screenshots of each test window
+bash observability/snapshot.sh load/results/<run>-windows.tsv docs/img
+
+PROJECT_ID=<PROJECT_ID> make gke-down       # same day
+```
+
+| File | Purpose |
+|---|---|
+| [infra/gke/](infra/gke/) | Terraform: zonal cluster, autoscaling node pool (2-4), Artifact Registry, least-privilege node service account, optional budget |
+| [infra/gke/up.sh](infra/gke/up.sh) / [down.sh](infra/gke/down.sh) | End-to-end bring-up and teardown |
+| [chaos/t9-cluster-autoscaler.sh](chaos/t9-cluster-autoscaler.sh) | T9: raises each pod's CPU request to 500m and pins the HPA at 8, then times Pending → new node → all Ready, and restores |
+
+Cost controls:
+- A **zonal** cluster, because GKE's free tier covers one zonal control plane.
+- `max_nodes = 4` hard-caps the Cluster Autoscaler.
+- The `OPTIMIZE_UTILIZATION` autoscaler profile removes idle nodes sooner.
+- `down.sh` deletes ingress-nginx *before* the cluster. Its load balancer was
+  created by Kubernetes, not Terraform, so `terraform destroy` alone can leave it
+  behind and still billing. The script then lists any leftover forwarding rules,
+  IP addresses or disks.
+
+At list prices, a few hours of 2–4 e2-standard-2 nodes plus one load balancer
+comes to a few US dollars, usually covered by free-trial credits. Check current
+pricing before you start.
 
 ## Endpoints
 

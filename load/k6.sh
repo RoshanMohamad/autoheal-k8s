@@ -33,5 +33,7 @@ fi
 # `docker stop`; k6 treats SIGTERM as a graceful stop and still prints results.
 NAME_ARGS=()
 [ -n "${K6_NAME:-}" ] && NAME_ARGS=(--name "$K6_NAME")
-exec docker run --rm -i --network kind "${NAME_ARGS[@]}" "$K6_IMAGE" run \
+# K6_NETWORK=bridge (with BASE_URL set to the load balancer) targets a cloud
+# cluster instead of kind.
+exec docker run --rm -i --network "${K6_NETWORK:-kind}" "${NAME_ARGS[@]}" "$K6_IMAGE" run \
   -e "BASE_URL=${BASE_URL:-http://${CLUSTER}-control-plane}" "${ENV_ARGS[@]}" "$@" - < "$SCRIPT"
