@@ -1,6 +1,6 @@
 .PHONY: help build test image cluster cluster-down load deploy undeploy \
         chaos-pod chaos-crash chaos-hang chaos-unready chaos-rollout chaos-drain chaos-all \
-        metrics-server load-spike load-steady gke-up gke-down chaos-ca status logs
+        metrics-server load-spike load-steady gke-up gke-down aks-up aks-down chaos-ca status logs
 
 CLUSTER ?= autoheal
 RELEASE ?= autoheal
@@ -32,6 +32,11 @@ help:
 	@echo "  make gke-up        - terraform cluster + deploy everything (PROJECT_ID=...)"
 	@echo "  make chaos-ca      - T9: exhaust capacity, expect Cluster Autoscaler to add a node"
 	@echo "  make gke-down      - tear it all down (PROJECT_ID=...)"
+	@echo ""
+	@echo "Cloud (AKS, costs money):"
+	@echo "  make aks-up        - terraform cluster + deploy everything (after az login)"
+	@echo "  make chaos-ca      - T9, same script as on GKE"
+	@echo "  make aks-down      - tear it all down"
 	@echo ""
 	@echo "  make status        - show pods, endpoints, PDB"
 
@@ -92,6 +97,12 @@ gke-up:
 
 gke-down:
 	@bash infra/gke/down.sh
+
+aks-up:
+	@bash infra/aks/up.sh
+
+aks-down:
+	@bash infra/aks/down.sh
 
 chaos-ca:
 	@bash chaos/t9-cluster-autoscaler.sh
