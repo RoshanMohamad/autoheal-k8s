@@ -52,6 +52,20 @@ grafana:
       enabled: true
       label: grafana_dashboard
       searchNamespace: ALL
+  # A loaded kind cluster on a laptop can leave Grafana's own boot taking
+  # well over the chart's default 60s+100s liveness budget, which kills it
+  # mid-startup and restart-loops it forever. Give it more room before
+  # kubelet gives up.
+  livenessProbe:
+    initialDelaySeconds: 90
+    failureThreshold: 20
+    periodSeconds: 10
+    timeoutSeconds: 30
+  readinessProbe:
+    initialDelaySeconds: 60
+    failureThreshold: 15
+    periodSeconds: 10
+    timeoutSeconds: 10
 
 kube-state-metrics:
   resources:

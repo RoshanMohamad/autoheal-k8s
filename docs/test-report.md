@@ -211,7 +211,9 @@ T6, measured from k6 exit:
 
 Environment: GKE zonal cluster, node pool of 2–4 × e2-standard-2 with the Cluster
 Autoscaler (`OPTIMIZE_UTILIZATION` profile), kube-prometheus-stack installed.
-Created with `make gke-up`, torn down with `make gke-down`.
+Created with `make gke-up`, torn down with `make gke-down`. The equivalent AKS
+environment (2–4 × Standard_D2s_v5, Free tier) is `make aks-up` / `make aks-down`;
+record which one a run used.
 
 | # | Scenario | Expected | Observed | Result |
 |---|---|---|---|---|

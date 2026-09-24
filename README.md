@@ -233,6 +233,63 @@ At list prices, a few hours of 2–4 e2-standard-2 nodes plus one load balancer
 comes to a few US dollars, usually covered by free-trial credits. Check current
 pricing before you start.
 
+## Cloud: AKS and the Cluster Autoscaler (Week 6, Azure)
+
+The same week-6 run on Azure instead of GKE. Pick one; both use the same Helm
+chart, monitoring stack and chaos scripts. This **costs money** from `aks-up`
+until `aks-down`.
+
+One-time setup:
+
+```bash
+# Install the Azure CLI: https://learn.microsoft.com/cli/azure/install-azure-cli
+az login
+az account set --subscription <SUBSCRIPTION_ID>   # if you have more than one
+```
+
+Run:
+
+```bash
+# Resource group, AKS (Free tier, 2-4 x Standard_D2s_v5), ACR, image push,
+# ingress-nginx, monitoring stack, app. Optional: LOCATION=westeurope (default
+# eastus), BUDGET_EMAIL=you@example.com for a $10 budget alerting at 50/90/100%.
+make aks-up
+
+export BASE_URL=http://<LB_IP> K6_NETWORK=bridge   # up.sh prints the IP
+
+make chaos-ca       # T9: pods Pending -> Cluster Autoscaler adds a node
+make load-spike     # T5/T6
+make chaos-all      # T1-T8
+
+make aks-down       # same day
+```
+
+| File | Purpose |
+|---|---|
+| [infra/aks/](infra/aks/) | Terraform: resource group, AKS with an autoscaling node pool (2-4), ACR with AcrPull for the kubelet identity, optional budget |
+| [infra/aks/up.sh](infra/aks/up.sh) / [down.sh](infra/aks/down.sh) | End-to-end bring-up and teardown |
+| [infra/aks/ci-setup.sh](infra/aks/ci-setup.sh) | One-time Entra ID app + GitHub OIDC federated credential for the `deploy-aks` CI job |
+
+AKS-specific details:
+- **vCPU quota.** Student and trial subscriptions often allow only 4–6 vCPUs per
+  region, while 4 nodes need 8. `up.sh` checks this first and warns; if T9 cannot
+  add a node, request a quota increase, use another `LOCATION`, or set
+  `MAX_NODES=3`.
+- **Load balancer health probe.** Azure probes `/` on ingress-nginx by default,
+  gets a 404 and drops all traffic. `up.sh` points the probe at `/healthz`.
+- **Cleanup.** The load balancer, public IP, VMs and disks live in the node
+  resource group (`MC_autoheal-rg_autoheal_<location>`), which Azure deletes with
+  the cluster. `down.sh` still checks both resource groups and lists any leftover
+  public IPs or disks.
+- Cost controls: Free-tier control plane (no hourly fee), `max_nodes = 4`, and an
+  autoscaler profile that removes idle nodes after 5 minutes instead of 10.
+
+CI deploy (optional): run `GITHUB_REPO=<owner>/<repo> bash infra/aks/ci-setup.sh`,
+bring the cluster up with `CI_PRINCIPAL_ID=<printed id> make aks-up`, and add the
+printed repository variables. Pushes to `main` then roll the Trivy-scanned image
+out to AKS. Terraform grants the CI identity access to only this registry and
+cluster, so it has no access while the cluster is down.
+
 ## Endpoints
 
 | Path | Purpose |

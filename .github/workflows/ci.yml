@@ -115,3 +115,60 @@ jobs:
             --set image.repository="$IMAGE_REPO" \
             --set image.tag="${{ github.sha }}" \
             --wait --timeout 10m
+
+  # Same flow as deploy-gke, for AKS. Created and torn down by hand
+  # (infra/aks/up.sh, down.sh); set AKS_DEPLOY to 'true' only while it is up.
+  # One-time auth setup: infra/aks/ci-setup.sh, then up.sh with CI_PRINCIPAL_ID.
+  deploy-aks:
+    needs: build-test-scan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AKS_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      id-token: write # OIDC token for the Entra ID federated credential
+    env:
+      RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP || 'autoheal-rg' }}
+      CLUSTER: ${{ vars.AKS_CLUSTER || 'autoheal' }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.RESOURCE_GROUP }}
+          cluster-name: ${{ env.CLUSTER }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Copy the exact image Trivy scanned instead of rebuilding it.
+      - name: Push image to ACR
+        run: |
+          SRC=ghcr.io/${{ github.repository }}/autoheal-api:${{ github.sha }}
+          DST=$ACR_NAME.azurecr.io/autoheal-api:${{ github.sha }}
+          az acr login --name "$ACR_NAME"
+          docker pull "$SRC"
+          docker tag "$SRC" "$DST"
+          docker push "$DST"
+          echo "IMAGE_REPO=${DST%:*}" >> "$GITHUB_ENV"
+
+      - uses: azure/setup-helm@v4
+
+      # --reuse-values keeps what up.sh set (e.g. serviceMonitor.enabled);
+      # no --install, so this fails loudly if up.sh has not been run.
+      - name: Rolling update
+        run: |
+          helm upgrade autoheal ./helm/autoheal-api --reuse-values \
+            --set image.repository="$IMAGE_REPO" \
+            --set image.tag="${{ github.sha }}" \
+            --wait --timeout 10m
