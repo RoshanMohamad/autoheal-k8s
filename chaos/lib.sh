@@ -27,6 +27,12 @@ restart_total() {
     awk '{s+=$1} END {print s+0}'
 }
 
+# "yes" once at least $1 pods are Ready. For recovery checks, where an HPA
+# scale-out during the scenario must not turn "capacity restored" into a failure.
+ready_at_least() {
+  [ "$(ready_count)" -ge "$1" ] && echo yes || echo no
+}
+
 endpoint_count() {
   kc get endpoints "$DEPLOY" \
     -o jsonpath='{.subsets[0].addresses[*].ip}' 2>/dev/null | wc -w | tr -d ' '
@@ -98,6 +104,38 @@ settle() {
     fi
     sleep 3
   done
+}
+
+# Background traffic: steady k6 load through the ingress while a scenario runs,
+# so its impact is measured in failed user requests, not just pod counts.
+# RATE is kept low enough that ONE replica stays under the HPA target: several
+# scenarios take a pod out, and at 20 req/s the survivor crossed 60% of its
+# 100m request and the HPA scaled out mid-scenario.
+BG_RATE="${BG_RATE:-10}"
+BG_WORK_MS="${BG_WORK_MS:-2}"
+BG_NAME="autoheal-bg-load"
+
+bg_load_start() {
+  BG_LOG="$1"
+  docker rm -f "$BG_NAME" >/dev/null 2>&1
+  RATE="$BG_RATE" WORK_MS="$BG_WORK_MS" DURATION=30m K6_NAME="$BG_NAME" \
+    bash ../load/k6.sh ../load/steady.js >"$BG_LOG" 2>&1 &
+  BG_PID=$!
+  # Let k6 reach its steady rate before the scenario injects anything.
+  sleep 10
+}
+
+# Stops the load and prints "requests failed" from its summary.
+bg_load_stop() {
+  if command -v k6 >/dev/null 2>&1; then
+    kill -INT "$BG_PID" 2>/dev/null
+  else
+    docker stop -t 30 "$BG_NAME" >/dev/null 2>&1
+  fi
+  wait "$BG_PID" 2>/dev/null
+  printf '%s %s\n' \
+    "$(sed -n 's/^RESULT requests=//p' "$BG_LOG" | tail -n 1)" \
+    "$(sed -n 's/^RESULT failed=//p' "$BG_LOG" | tail -n 1)"
 }
 
 require_ready() {

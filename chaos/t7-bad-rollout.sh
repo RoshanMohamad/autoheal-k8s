@@ -47,7 +47,7 @@ log "rolling back with kubectl rollout undo"
 kc rollout undo deploy/"$DEPLOY" >/dev/null
 kc set env deploy/"$DEPLOY" STARTUP_DELAY_MS=2000 >/dev/null
 
-if ! ELAPSED=$(wait_for 180 "$BEFORE_READY" ready_count); then
+if ! ELAPSED=$(wait_for 180 yes ready_at_least "$BEFORE_READY"); then
   fail "rollback did not restore $BEFORE_READY ready pod(s)"
   kc get pods -l "$APP_SELECTOR"
   exit 1

@@ -1,0 +1,13 @@
+# Values for the metrics-server Helm chart on kind.
+#
+# kind's kubelets serve self-signed certificates that are not signed by the
+# cluster CA, so metrics-server refuses to scrape them and the HPA reports
+# <unknown> CPU forever. Skipping kubelet TLS verification is acceptable for a
+# local cluster only; managed clusters ship a working metrics-server already.
+args:
+  - --kubelet-insecure-tls
+  - --kubelet-preferred-address-types=InternalIP
+
+# Default is 15s. Matches the HPA's 15s sync period, so utilisation reacts to a
+# spike within one or two HPA loops.
+metricResolution: 15s

@@ -98,6 +98,27 @@ make chaos-drain    # T8: drain a node, expect the PDB to hold
 make chaos-all      # everything, with a results table
 ```
 
+`make chaos-all` runs each scenario under steady k6 background traffic (10 req/s,
+kept low enough that one pod can carry it, so the HPA does not scale mid-scenario) and reports failed user
+requests per scenario alongside PASS/FAIL. `LOAD=0` turns the traffic off.
+Tune it with `BG_RATE` and `BG_WORK_MS`.
+
+It also writes each scenario's time window to `load/results/`. With the
+monitoring stack installed, turn those windows into dashboard screenshots with:
+
+```bash
+bash observability/snapshot.sh load/results/chaos-<stamp>-windows.tsv docs/img
+```
+
+That uses headless Chrome or Edge and Grafana's anonymous read-only access.
+
+**Laptop limits.** On an 8 GB machine, kind plus kube-prometheus-stack plus a
+load test does not fit. The Docker VM thrashed (load average 66, half of all CPU
+time in the kernel), the API server restarted, and idle pods reported phantom
+CPU that kept the HPA scaled out. Measured runs were therefore done **without**
+the monitoring stack. Install it only for dashboards and screenshots, or on a
+machine with 16 GB or more.
+
 Resilience settings live in [helm/autoheal-api/values.yaml](helm/autoheal-api/values.yaml):
 `maxUnavailable: 0` (a new pod must be Ready before an old one goes), a
 PodDisruptionBudget with `minAvailable: 1`, and `topologySpreadConstraints` to
@@ -108,6 +129,109 @@ Spreading uses `topologySpreadConstraints` rather than preferred
 both replicas on the same node — the exact failure it was meant to prevent.
 `whenUnsatisfiable: ScheduleAnyway` is deliberate, so the HPA can still scale to
 8 replicas on a 2-worker cluster instead of leaving pods Pending.
+
+## Autoscaling (Week 5)
+
+```bash
+# 1. Metrics Server (kind needs --kubelet-insecure-tls; see kind/metrics-server-values.yaml)
+make metrics-server
+kubectl top pods          # should show CPU/memory within ~30s
+
+# 2. Deploy with the HPA (on by default: min 2, max 8, target 60% CPU)
+make deploy
+kubectl get hpa           # TARGETS should read e.g. "cpu: 3%/60%", not <unknown>
+
+# 3. T5 + T6: k6 spike on /work, then scale-in (~20 min end to end)
+make load-spike
+
+# Steady background traffic, e.g. to measure availability during a chaos run
+RATE=100 DURATION=3m make load-steady
+```
+
+k6 does not need to be installed: [load/k6.sh](load/k6.sh) uses a local `k6` if
+present, and otherwise runs the `grafana/k6` image on the `kind` Docker network,
+aimed at the control-plane node where the ingress controller listens.
+
+| File | Purpose |
+|---|---|
+| [helm/autoheal-api/templates/hpa.yaml](helm/autoheal-api/templates/hpa.yaml) | `autoscaling/v2` HPA with scale-up/scale-down behaviour policies |
+| [kind/metrics-server-values.yaml](kind/metrics-server-values.yaml) | Metrics Server values for kind |
+| [load/spike.js](load/spike.js) | T5: ramp 10 → 500 VUs over 5 min on `/work`, hold 3 min |
+| [load/steady.js](load/steady.js) | Constant-arrival-rate background traffic |
+| [chaos/t5-t6-autoscale.sh](chaos/t5-t6-autoscale.sh) | Runs the spike, asserts scale-up, availability, scale-in and no flapping |
+
+HPA behaviour, from [values.yaml](helm/autoheal-api/values.yaml):
+
+- **Scale-up:** no stabilisation window, at most +100% per 60s, so 2 → 4 → 8.
+- **Scale-down:** 300s stabilisation window (anti-flapping), then at most −50%
+  per 60s, so 8 → 4 → 2. Expected total ≈ 1 min metric lag + 5 min window + 1–2
+  min of steps, inside the 10 min target.
+- The Deployment omits `spec.replicas` while the HPA is enabled. Otherwise every
+  `helm upgrade` would reset the replica count to 2 in the middle of a scale-out.
+  **Upgrading an existing release** from the Week 4 chart removes the field, and
+  Kubernetes briefly defaults it to 1 until the HPA restores 2 (about 15s). Do
+  that upgrade outside a test run.
+
+Load is tuned through environment variables: `PEAK_VUS`, `RAMP`, `HOLD`,
+`WORK_MS` and `THINK_S`. Offered load is about `PEAK_VUS / THINK_S` req/s, each
+costing `WORK_MS` of CPU. The defaults (500 VUs, 10 ms, 3 s) produce roughly 1.7
+cores of work. That saturates 2 pods (0.6 cores of limits) but fits within 8
+(2.4 cores), so p95 latency should recover once the app has scaled out. On a
+smaller laptop, lower `PEAK_VUS`.
+
+## Cloud: GKE and the Cluster Autoscaler (Week 6)
+
+This part **costs money** from `gke-up` until `gke-down`. Run it in one sitting.
+
+One-time setup:
+
+```bash
+# Install the Google Cloud CLI: https://cloud.google.com/sdk/docs/install
+gcloud components install gke-gcloud-auth-plugin
+gcloud auth login
+gcloud auth application-default login      # credentials Terraform uses
+gcloud config set project <PROJECT_ID>     # a project with billing enabled
+```
+
+Run:
+
+```bash
+# Cluster (zonal, 2-4 x e2-standard-2), registry, image push, ingress-nginx,
+# monitoring stack, app. Add BILLING_ACCOUNT=... to also create a $10 budget
+# with email alerts at 50/90/100%.
+PROJECT_ID=<PROJECT_ID> make gke-up
+
+# Point k6 at the cloud load balancer (up.sh prints the IP)
+export BASE_URL=http://<LB_IP> K6_NETWORK=bridge
+
+make chaos-ca       # T9: pods Pending -> Cluster Autoscaler adds a node
+make load-spike     # T5/T6 on real nodes
+make chaos-all      # T1-T8, now with the monitoring stack running
+
+# Grafana screenshots of each test window
+bash observability/snapshot.sh load/results/<run>-windows.tsv docs/img
+
+PROJECT_ID=<PROJECT_ID> make gke-down       # same day
+```
+
+| File | Purpose |
+|---|---|
+| [infra/gke/](infra/gke/) | Terraform: zonal cluster, autoscaling node pool (2-4), Artifact Registry, least-privilege node service account, optional budget |
+| [infra/gke/up.sh](infra/gke/up.sh) / [down.sh](infra/gke/down.sh) | End-to-end bring-up and teardown |
+| [chaos/t9-cluster-autoscaler.sh](chaos/t9-cluster-autoscaler.sh) | T9: raises each pod's CPU request to 500m and pins the HPA at 8, then times Pending → new node → all Ready, and restores |
+
+Cost controls:
+- A **zonal** cluster, because GKE's free tier covers one zonal control plane.
+- `max_nodes = 4` hard-caps the Cluster Autoscaler.
+- The `OPTIMIZE_UTILIZATION` autoscaler profile removes idle nodes sooner.
+- `down.sh` deletes ingress-nginx *before* the cluster. Its load balancer was
+  created by Kubernetes, not Terraform, so `terraform destroy` alone can leave it
+  behind and still billing. The script then lists any leftover forwarding rules,
+  IP addresses or disks.
+
+At list prices, a few hours of 2–4 e2-standard-2 nodes plus one load balancer
+comes to a few US dollars, usually covered by free-trial credits. Check current
+pricing before you start.
 
 ## Endpoints
 

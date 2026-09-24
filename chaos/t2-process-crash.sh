@@ -24,7 +24,7 @@ if ! RESTART_ELAPSED=$(wait_for "$DEADLINE" "$EXPECTED" restart_total); then
 fi
 info "restart count incremented after ${RESTART_ELAPSED}s"
 
-READY_ELAPSED=$(wait_for "$DEADLINE" "$BEFORE_READY" ready_count)
+READY_ELAPSED=$(wait_for "$DEADLINE" yes ready_at_least "$BEFORE_READY")
 
 echo
 kc get pods -l "$APP_SELECTOR"
