@@ -9,3 +9,5 @@ load/results/
 .terraform/
 *.tfstate
 *.tfstate.*
+*.tfvars
+infra/gke/autoheal-k8s-a9a1689b73f0.json
