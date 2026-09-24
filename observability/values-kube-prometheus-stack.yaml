@@ -19,6 +19,19 @@ prometheus:
     # the release label, rather than only those created by this chart.
     serviceMonitorSelectorNilUsesHelmValues: true
     ruleSelectorNilUsesHelmValues: true
+    # Ships every scraped sample to Grafana Cloud so dashboards can be built
+    # and viewed there instead of running Grafana locally (see grafana.enabled
+    # below). Credentials come from the grafana-cloud-credentials Secret,
+    # created out-of-band with `kubectl create secret` - never committed here.
+    remoteWrite:
+      - url: https://prometheus-prod-55-prod-gb-south-1.grafana.net/api/prom/push
+        basicAuth:
+          username:
+            name: grafana-cloud-credentials
+            key: username
+          password:
+            name: grafana-cloud-credentials
+            key: password
 
 alertmanager:
   alertmanagerSpec:
@@ -29,43 +42,12 @@ alertmanager:
       limits:
         memory: 128Mi
 
+# Local Grafana is disabled: etcd on this laptop is disk-bound, and Grafana's
+# boot kept crash-looping the whole node under that I/O pressure. Metrics are
+# shipped via prometheus.prometheusSpec.remoteWrite (above) to Grafana Cloud
+# instead - dashboards live there, not on this cluster.
 grafana:
-  adminPassword: admin
-  defaultDashboardsTimezone: browser
-  # Read-only anonymous access so observability/snapshot.sh can screenshot
-  # dashboards with a headless browser. Local cluster only - Grafana is never
-  # exposed beyond a port-forward.
-  grafana.ini:
-    auth.anonymous:
-      enabled: true
-      org_role: Viewer
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      memory: 256Mi
-  # Picks up any ConfigMap labelled grafana_dashboard="1", which is how the
-  # autoheal dashboard gets loaded.
-  sidecar:
-    dashboards:
-      enabled: true
-      label: grafana_dashboard
-      searchNamespace: ALL
-  # A loaded kind cluster on a laptop can leave Grafana's own boot taking
-  # well over the chart's default 60s+100s liveness budget, which kills it
-  # mid-startup and restart-loops it forever. Give it more room before
-  # kubelet gives up.
-  livenessProbe:
-    initialDelaySeconds: 90
-    failureThreshold: 20
-    periodSeconds: 10
-    timeoutSeconds: 30
-  readinessProbe:
-    initialDelaySeconds: 60
-    failureThreshold: 15
-    periodSeconds: 10
-    timeoutSeconds: 10
+  enabled: false
 
 kube-state-metrics:
   resources:
