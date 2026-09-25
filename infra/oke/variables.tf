@@ -9,6 +9,18 @@ variable "region" {
   default     = ""
 }
 
+variable "oci_auth" {
+  description = "Terraform OCI provider auth method. ApiKey reads ~/.oci/config (what `oci setup config` writes, on a laptop or in Cloud Shell); InstancePrincipal/ResourcePrincipal are for code already running inside OCI (e.g. the cluster-autoscaler pod, not this Terraform run)."
+  type        = string
+  default     = "ApiKey"
+}
+
+variable "oci_profile" {
+  description = "Profile name in ~/.oci/config to use. DEFAULT unless `oci setup config` was run with --profile-name."
+  type        = string
+  default     = "DEFAULT"
+}
+
 variable "cluster_name" {
   type    = string
   default = "autoheal"

@@ -44,7 +44,8 @@ terraform apply -input=false -auto-approve \
   ${NODE_SHAPE:+-var "node_shape=$NODE_SHAPE"} \
   ${NODE_OCPUS:+-var "node_ocpus=$NODE_OCPUS"} \
   ${NODE_MEMORY_GBS:+-var "node_memory_gbs=$NODE_MEMORY_GBS"} \
-  ${BOOT_VOLUME_GBS:+-var "boot_volume_size_in_gbs=$BOOT_VOLUME_GBS"}
+  ${BOOT_VOLUME_GBS:+-var "boot_volume_size_in_gbs=$BOOT_VOLUME_GBS"} \
+  ${OCI_PROFILE:+-var "oci_profile=$OCI_PROFILE"}
 
 IMAGE_REPO=$(terraform output -raw image_repository)
 CLUSTER_ID=$(terraform output -raw cluster_id)
