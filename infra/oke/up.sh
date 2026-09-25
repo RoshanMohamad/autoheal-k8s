@@ -4,15 +4,22 @@
 #   COMPARTMENT_OCID=ocid1.compartment.oc1..xxx bash infra/oke/up.sh
 #   LOCATION=eu-frankfurt-1 MAX_NODES=3 bash infra/oke/up.sh
 #
+# Defaults to VM.Standard.A1.Flex (Ampere/arm64), sized to fit inside OCI's
+# Always Free allowance (4 OCPU/24GB total, 200GB block storage, one 10Mbps
+# flexible load balancer) -- this run then costs $0. Override NODE_SHAPE=
+# VM.Standard.E4.Flex (and raise LB_BANDWIDTH_MBPS) for a bigger, billed x86
+# cluster; see infra/oke/variables.tf for the sizing knobs.
+#
 # Reads tenancy/user/fingerprint/key from ~/.oci/config (`oci setup config`)
 # unless OCI_CLI_* env vars are set. CI_GROUP_NAME (default
 # github-autoheal-deploy, printed by ci-setup.sh) gets a policy scoped to this
 # compartment; set it to "" to skip.
 #
-# Prerequisites: oci CLI (`oci setup config`), terraform, helm, kubectl, docker.
+# Prerequisites: oci CLI (`oci setup config`), terraform, helm, kubectl,
+# docker with buildx (for the arm64 build).
 #
-# Costs money from the moment it finishes (unless everything fits the Always
-# Free A1.Flex/OCPU allowance). Tear down with infra/oke/down.sh.
+# Tear down with infra/oke/down.sh -- Always Free resources don't bill, but
+# an idle cluster still counts against the tenancy's Always Free allowance.
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT=../..
@@ -22,6 +29,7 @@ REGION="${LOCATION:-$(oci iam region-subscription list --query 'data[0]."region-
 MAX_NODES="${MAX_NODES:-4}"
 MONITORING="${MONITORING:-1}"
 CI_GROUP_NAME="${CI_GROUP_NAME-github-autoheal-deploy}"
+LB_BANDWIDTH_MBPS="${LB_BANDWIDTH_MBPS:-10}"
 TAG="${TAG:-$(git rev-parse --short HEAD)}"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
@@ -32,12 +40,19 @@ terraform apply -input=false -auto-approve \
   -var "compartment_ocid=$COMPARTMENT_OCID" \
   -var "region=$REGION" \
   -var "max_nodes=$MAX_NODES" \
-  -var "ci_group_name=$CI_GROUP_NAME"
+  -var "ci_group_name=$CI_GROUP_NAME" \
+  ${NODE_SHAPE:+-var "node_shape=$NODE_SHAPE"} \
+  ${NODE_OCPUS:+-var "node_ocpus=$NODE_OCPUS"} \
+  ${NODE_MEMORY_GBS:+-var "node_memory_gbs=$NODE_MEMORY_GBS"} \
+  ${BOOT_VOLUME_GBS:+-var "boot_volume_size_in_gbs=$BOOT_VOLUME_GBS"}
 
 IMAGE_REPO=$(terraform output -raw image_repository)
 CLUSTER_ID=$(terraform output -raw cluster_id)
 NODE_POOL_ID=$(terraform output -raw node_pool_id)
 MIN_NODES=$(terraform output -raw min_nodes)
+NODE_SHAPE_OUT=$(terraform output -raw node_shape)
+ARCH=amd64
+[[ "$NODE_SHAPE_OUT" == *A1* ]] && ARCH=arm64
 
 step "kubectl credentials"
 mkdir -p "$HOME/.kube"
@@ -51,22 +66,24 @@ for _ in $(seq 1 60); do
   sleep 10
 done
 
-step "build and push $IMAGE_REPO:$TAG"
+step "build and push $IMAGE_REPO:$TAG (linux/$ARCH, matching node_shape $NODE_SHAPE_OUT)"
 REGION_KEY=$(oci iam region list --query "data[?name=='$REGION'].key | [0]" --raw-output | tr 'A-Z' 'a-z')
 echo "    docker login to $REGION_KEY.ocir.io needed once; see infra/oke/ci-setup.sh or"
 echo "    https://docs.oracle.com/iaas/Content/Registry/Tasks/registrypushingimagesusingthedockercli.htm"
 docker login "$REGION_KEY.ocir.io" || true
-# OKE nodes are amd64 by default (node_shape = VM.Standard.E4.Flex); building
-# for it explicitly keeps an Apple-silicon laptop from pushing an image the
-# nodes cannot run.
-docker build --platform linux/amd64 -t "$IMAGE_REPO:$TAG" "$ROOT/app"
-docker push "$IMAGE_REPO:$TAG"
+# --push builds straight to the registry: on an amd64 laptop building for
+# arm64 (the Always Free A1.Flex default), a plain `docker build` can't load
+# a foreign-arch image locally to push separately.
+docker buildx build --platform "linux/$ARCH" -t "$IMAGE_REPO:$TAG" --push "$ROOT/app"
 
-step "ingress-nginx (OCI Load Balancer)"
+step "ingress-nginx (OCI Load Balancer, ${LB_BANDWIDTH_MBPS}Mbps flexible -- 10 is the Always Free ceiling)"
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
 helm repo update ingress-nginx >/dev/null
 helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   -n ingress-nginx --create-namespace \
+  --set 'controller.service.annotations.service\.beta\.kubernetes\.io/oci-load-balancer-shape=flexible' \
+  --set "controller.service.annotations.service\.beta\.kubernetes\.io/oci-load-balancer-shape-flex-min=$LB_BANDWIDTH_MBPS" \
+  --set "controller.service.annotations.service\.beta\.kubernetes\.io/oci-load-balancer-shape-flex-max=$LB_BANDWIDTH_MBPS" \
   --wait --timeout 10m
 
 step "cluster-autoscaler (OCI provider, node pool $NODE_POOL_ID)"

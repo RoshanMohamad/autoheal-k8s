@@ -20,20 +20,27 @@ variable "vcn_cidr" {
 }
 
 variable "node_shape" {
-  description = "VM.Standard.E4.Flex is AMD, pay-as-you-go, covered by trial credits. VM.Standard.A1.Flex (Ampere/arm64) is Always Free up to 4 OCPU/24GB total in the tenancy, but the app image must then be built for arm64."
+  description = "VM.Standard.A1.Flex (Ampere/arm64) is Always Free up to 4 OCPU/24GB total per tenancy -- the default here, sized so min_nodes/max_nodes stay inside that. up.sh builds the app image for arm64 to match. Switch to VM.Standard.E4.Flex (AMD, pay-as-you-go) for a bigger/x86 cluster."
   type        = string
-  default     = "VM.Standard.E4.Flex"
+  default     = "VM.Standard.A1.Flex"
 }
 
 variable "node_ocpus" {
-  description = "OCPUs per node (flex shape). 1 OCPU ~= 2 vCPUs, matching AKS's Standard_D2s_v5."
+  description = "OCPUs per node (flex shape). At the defaults, max_nodes x this must stay <= 4 to fit the Always Free A1.Flex allowance."
   type        = number
   default     = 1
 }
 
 variable "node_memory_gbs" {
-  type    = number
-  default = 8
+  description = "Memory (GB) per node. At the defaults, max_nodes x this must stay <= 24 to fit the Always Free A1.Flex allowance."
+  type        = number
+  default     = 6
+}
+
+variable "boot_volume_size_in_gbs" {
+  description = "Per-node boot volume. Always Free includes 200 GB of total block storage, so max_nodes x this must stay well under that (defaults: 4 x 50 = 200 GB, i.e. no headroom -- lower this or max_nodes if the compartment has other volumes)."
+  type        = number
+  default     = 50
 }
 
 variable "min_nodes" {
@@ -42,7 +49,7 @@ variable "min_nodes" {
 }
 
 variable "max_nodes" {
-  description = "Hard cap on the Cluster Autoscaler: the main cost control."
+  description = "Hard cap on the Cluster Autoscaler: the main cost/quota control. See node_ocpus, node_memory_gbs and boot_volume_size_in_gbs for how this interacts with the Always Free allowance."
   type        = number
   default     = 4
 }

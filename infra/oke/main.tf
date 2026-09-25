@@ -2,6 +2,17 @@ data "oci_identity_availability_domains" "this" {
   compartment_id = var.compartment_ocid
 }
 
+locals {
+  # A1.Flex nodes are arm64 and need an aarch64 OKE image; every other shape
+  # (E4.Flex, etc.) is x86_64 and must NOT get one.
+  node_is_arm = length(regexall("A1", var.node_shape)) > 0
+  node_image_id = [
+    for s in data.oci_containerengine_node_pool_option.this.sources :
+    s.image_id if length(regexall("OKE-", s.source_name)) > 0 &&
+    length(regexall("(?i)aarch64", s.source_name)) > 0 == local.node_is_arm
+  ][0]
+}
+
 # ---------------------------------------------------------------- networking
 
 # A single public VCN: simplest setup that still gives every OKE component
@@ -155,8 +166,9 @@ resource "oci_containerengine_node_pool" "this" {
   }
 
   node_source_details {
-    source_type = "IMAGE"
-    image_id    = [for s in data.oci_containerengine_node_pool_option.this.sources : s.image_id if length(regexall("OKE-", s.source_name)) > 0][0]
+    source_type             = "IMAGE"
+    image_id                = local.node_image_id
+    boot_volume_size_in_gbs = var.boot_volume_size_in_gbs
   }
 
   node_config_details {

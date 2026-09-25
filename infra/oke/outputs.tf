@@ -35,3 +35,7 @@ output "min_nodes" {
 output "max_nodes" {
   value = var.max_nodes
 }
+
+output "node_shape" {
+  value = var.node_shape
+}

@@ -236,9 +236,10 @@ pricing before you start.
 ## Cloud: OKE and the Cluster Autoscaler (Week 6, Oracle Cloud)
 
 The same week-6 run on Oracle Cloud Infrastructure instead of GKE. Pick one;
-both use the same Helm chart, monitoring stack and chaos scripts. This
-**costs money** from `oke-up` until `oke-down` (unless it fits inside OCI's
-Always Free allowance — see below).
+both use the same Helm chart, monitoring stack and chaos scripts. Defaults to
+OCI's **Always Free** shapes (2–4 × `VM.Standard.A1.Flex`, 1 OCPU/6GB each,
+one 10Mbps flexible load balancer), so a normal run of this **costs $0** —
+see the sizing math and how to switch to a bigger, billed cluster below.
 
 One-time setup:
 
@@ -250,10 +251,12 @@ oci setup config      # writes ~/.oci/config: tenancy, user, region, API key
 Run:
 
 ```bash
-# VCN, OKE (2-4 nodes), OCIR image push, ingress-nginx, cluster-autoscaler,
-# monitoring stack, app. COMPARTMENT_OCID is required (oci iam compartment
-# list, or the tenancy OCID from ~/.oci/config for a fresh account). Optional:
-# LOCATION=eu-frankfurt-1 (default: the region in ~/.oci/config).
+# VCN, OKE (2-4 Always Free A1.Flex nodes), OCIR image push (built for
+# arm64), ingress-nginx (capped at 10Mbps -- the Always Free LB ceiling),
+# cluster-autoscaler, monitoring stack, app. COMPARTMENT_OCID is required
+# (oci iam compartment list, or the tenancy OCID from ~/.oci/config for a
+# fresh account). Optional: LOCATION=eu-frankfurt-1 (default: the region in
+# ~/.oci/config).
 COMPARTMENT_OCID=<COMPARTMENT_OCID> make oke-up
 
 export BASE_URL=http://<LB_IP> K6_NETWORK=bridge   # up.sh prints the IP
@@ -280,11 +283,22 @@ OKE-specific details:
   OCID with `--nodes=min:max:poolID`. It authenticates as the node's own
   instance principal, which `ci-setup.sh`'s dynamic group + policy grants.
 - **metrics-server isn't preinstalled**, unlike AKS/GKE; `up.sh` installs it.
-- **Always Free option.** Setting `node_shape = VM.Standard.A1.Flex` in
-  `infra/oke/variables.tf` runs the whole node pool at $0 within OCI's
-  Always Free Ampere allowance (4 OCPU / 24 GB total per tenancy), but the
-  app image then needs an arm64 build (`docker buildx build --platform
-  linux/arm64`) since `up.sh` builds amd64 by default.
+- **Always Free sizing.** `node_ocpus x max_nodes` must stay ≤ 4 and
+  `node_memory_gbs x max_nodes` ≤ 24 (the Ampere allowance is per-tenancy,
+  not per-cluster); `boot_volume_size_in_gbs x max_nodes` must stay under the
+  200GB block-storage allowance. The defaults (1 OCPU / 6GB / 50GB boot, 4
+  nodes max) land exactly at the OCPU and memory ceilings with zero headroom
+  in either dimension — lower `MAX_NODES` first if a create fails on quota.
+  `up.sh` detects the arm64 shape from Terraform's output and builds the app
+  image for `linux/arm64` with `docker buildx` automatically; needs Docker
+  Desktop or a buildx builder with the QEMU emulator on an x86 laptop.
+- **A1.Flex capacity varies by region/AD.** "Out of host capacity" on
+  `terraform apply` is common for the free Ampere shape; retry, or try
+  another `LOCATION`.
+- **Bigger, billed cluster:** `NODE_SHAPE=VM.Standard.E4.Flex NODE_OCPUS=1
+  NODE_MEMORY_GBS=8 LB_BANDWIDTH_MBPS=100 COMPARTMENT_OCID=<...> make oke-up`
+  switches to AMD nodes and a faster load balancer (trial credits or a paid
+  account only — the Always Free shapes don't apply to E4.Flex).
 - **Cleanup.** The OCI Load Balancer behind ingress-nginx is created by
   Kubernetes, not Terraform, so `down.sh` removes it first, then lists any
   leftover load balancers, instances or public IPs in the compartment.
