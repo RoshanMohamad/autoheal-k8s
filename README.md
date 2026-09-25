@@ -2,6 +2,31 @@
 
 Self-healing, autoscaling Kubernetes demo. Full proposal in [claude.md](claude.md).
 
+A small stateless API (`app/`) is deployed to Kubernetes with liveness, readiness
+and startup probes, a `RollingUpdate` strategy, a `PodDisruptionBudget`, and a
+`HorizontalPodAutoscaler`. Scripted chaos (`chaos/`) kills pods, hangs the event
+loop, flips readiness, ships a broken rollout, and drains a node; scripted load
+(`load/`, k6) drives a traffic spike. A `kube-prometheus-stack` install
+(`observability/`) turns each recovery or scaling event into a live Grafana
+dashboard and Prometheus alerts, so the claim "it self-heals and autoscales" is
+measured, not asserted. It runs locally on `kind`, and the same Helm chart
+deploys to GKE or OKE for the Cluster Autoscaler test (T9). See
+[docs/test-report.md](docs/test-report.md) for each scenario's expected vs.
+observed result.
+
+## Dashboard
+
+The Grafana dashboard (`observability/grafana-dashboard.json`) is the single
+screen that tells the whole self-healing/autoscaling story: desired replicas,
+firing alerts, per-pod restart counts, CPU per pod, and HPA current vs. desired
+replicas, all live over the last 30 minutes.
+
+![Health at a glance: desired replicas, time range, firing alerts](docs/img/dashboard-health.png)
+
+![Self-healing: pod restarts, all at 0 across every replica](docs/img/dashboard-selfhealing.png)
+
+![Autoscaling: CPU per pod climbing under load, and the HPA scaling 2 → 8 replicas and back](docs/img/dashboard-autoscaling.png)
+
 ## Local setup (Week 1-2)
 
 ```bash
