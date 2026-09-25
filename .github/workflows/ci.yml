@@ -116,34 +116,39 @@ jobs:
             --set image.tag="${{ github.sha }}" \
             --wait --timeout 10m
 
-  # Same flow as deploy-gke, for AKS. Created and torn down by hand
-  # (infra/aks/up.sh, down.sh); set AKS_DEPLOY to 'true' only while it is up.
-  # One-time auth setup: infra/aks/ci-setup.sh, then up.sh with CI_PRINCIPAL_ID.
-  deploy-aks:
+  # Same flow as deploy-gke, for OKE. Created and torn down by hand
+  # (infra/oke/up.sh, down.sh); set OKE_DEPLOY to 'true' only while it is up.
+  # One-time auth setup: infra/oke/ci-setup.sh, then up.sh with CI_GROUP_NAME.
+  # OCI has no OIDC federation as simple as Azure/GCP's, so this authenticates
+  # with the API signing key ci-setup.sh created instead of id-token: write.
+  deploy-oke:
     needs: build-test-scan
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AKS_DEPLOY == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.OKE_DEPLOY == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
-      id-token: write # OIDC token for the Entra ID federated credential
     env:
-      RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP || 'autoheal-rg' }}
-      CLUSTER: ${{ vars.AKS_CLUSTER || 'autoheal' }}
-      ACR_NAME: ${{ vars.ACR_NAME }}
+      COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
+      REGION: ${{ vars.OCI_CLI_REGION }}
+      CLUSTER: ${{ vars.OCI_CLUSTER || 'autoheal' }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: azure/login@v2
+      - uses: oracle-actions/configure-ociauth@v1
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          user: ${{ secrets.OCI_CLI_USER }}
+          tenancy: ${{ secrets.OCI_CLI_TENANCY }}
+          fingerprint: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          private-key: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          region: ${{ env.REGION }}
 
-      - uses: azure/aks-set-context@v4
-        with:
-          resource-group: ${{ env.RESOURCE_GROUP }}
-          cluster-name: ${{ env.CLUSTER }}
+      - name: kubectl credentials
+        run: |
+          CLUSTER_ID=$(oci ce cluster list --compartment-id "$COMPARTMENT_OCID" \
+            --name "$CLUSTER" --lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
+          oci ce cluster create-kubeconfig --cluster-id "$CLUSTER_ID" --file "$HOME/.kube/config" \
+            --region "$REGION" --token-version 2.0.0 --kube-endpoint PUBLIC_ENDPOINT
 
       - uses: docker/login-action@v3
         with:
@@ -151,12 +156,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Copy the exact image Trivy scanned instead of rebuilding it.
-      - name: Push image to ACR
+      - name: Push image to OCIR
         run: |
+          REGION_KEY=$(oci iam region list --query "data[?name=='$REGION'].key | [0]" --raw-output | tr 'A-Z' 'a-z')
+          NAMESPACE=$(oci os ns get --query data --raw-output)
           SRC=ghcr.io/${{ github.repository }}/autoheal-api:${{ github.sha }}
-          DST=$ACR_NAME.azurecr.io/autoheal-api:${{ github.sha }}
-          az acr login --name "$ACR_NAME"
+          DST=$REGION_KEY.ocir.io/$NAMESPACE/autoheal-api:${{ github.sha }}
+          echo "${{ secrets.OCIR_AUTH_TOKEN }}" | docker login "$REGION_KEY.ocir.io" \
+            --username "$NAMESPACE/${{ vars.OCI_USER_NAME }}" --password-stdin
           docker pull "$SRC"
           docker tag "$SRC" "$DST"
           docker push "$DST"
