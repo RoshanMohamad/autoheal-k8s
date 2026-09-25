@@ -32,6 +32,14 @@ prometheus:
           password:
             name: grafana-cloud-credentials
             key: password
+        # Unfiltered, this ships every kube-state-metrics/node-exporter/apiserver
+        # series too - far more volume than this laptop's uplink can keep up
+        # with (the queue backlogged to 500k+ pending samples). Keep only what
+        # grafana-dashboard.json and alert-rules.yaml actually query.
+        writeRelabelConfigs:
+          - sourceLabels: [__name__]
+            regex: "up|ALERTS|ALERTS_FOR_STATE|http_request_duration_seconds_bucket|http_request_duration_seconds_count|http_request_duration_seconds_sum|process_cpu_seconds_total|process_resident_memory_bytes|kube_deployment_metadata_generation|kube_deployment_spec_replicas|kube_deployment_status_replicas_available|kube_deployment_status_replicas_ready|kube_deployment_status_replicas_unavailable|kube_horizontalpodautoscaler_spec_max_replicas|kube_horizontalpodautoscaler_spec_min_replicas|kube_horizontalpodautoscaler_status_current_replicas|kube_horizontalpodautoscaler_status_desired_replicas|kube_pod_container_status_restarts_total|kube_pod_status_ready|kube_poddisruptionbudget_status_expected_pods|kube_poddisruptionbudget_status_current_healthy|kube_node_info|node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|node_cpu_seconds_total|container_cpu_usage_seconds_total"
+            action: keep
 
 alertmanager:
   alertmanagerSpec:
