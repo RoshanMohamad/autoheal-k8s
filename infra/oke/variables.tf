@@ -4,9 +4,8 @@ variable "compartment_ocid" {
 }
 
 variable "region" {
-  description = "OCI region, e.g. us-ashburn-1. Defaults to the region in ~/.oci/config if left empty."
+  description = "OCI region, e.g. uk-london-1. Required -- not defaulted, because an empty string is silently accepted by the provider and produces broken endpoint URLs like identity..oci.oraclecloud.com instead of an error (this bit us once: Cloud Shell's config file has no region= line to fall back to)."
   type        = string
-  default     = ""
 }
 
 variable "oci_auth" {

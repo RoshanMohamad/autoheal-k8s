@@ -12,6 +12,7 @@ cd "$(dirname "$0")"
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
 COMPARTMENT_OCID=$(terraform output -raw compartment_ocid 2>/dev/null)
+REGION=$(terraform output -raw region 2>/dev/null)
 
 if kubectl get ns ingress-nginx >/dev/null 2>&1; then
   step "removing ingress-nginx and its load balancer"
@@ -25,7 +26,8 @@ fi
 
 step "terraform destroy"
 terraform destroy -input=false -auto-approve \
-  ${COMPARTMENT_OCID:+-var "compartment_ocid=$COMPARTMENT_OCID"}
+  ${COMPARTMENT_OCID:+-var "compartment_ocid=$COMPARTMENT_OCID"} \
+  ${REGION:+-var "region=$REGION"}
 
 step "checking for leftover billable resources"
 if [ -n "$COMPARTMENT_OCID" ]; then

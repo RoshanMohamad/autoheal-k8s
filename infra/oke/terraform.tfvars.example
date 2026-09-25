@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) and fill in, or pass the same as
+# -var flags. compartment_ocid and region are required -- Terraform will
+# refuse to plan/apply without them (no silent empty-region bug).
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+compartment_ocid = "ocid1.compartment.oc1..xxxxxxxx" # oci iam compartment list; tenancy OCID for a fresh account's root compartment
+region           = "uk-london-1"

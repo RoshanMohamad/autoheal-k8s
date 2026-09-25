@@ -39,3 +39,7 @@ output "max_nodes" {
 output "node_shape" {
   value = var.node_shape
 }
+
+output "region" {
+  value = var.region
+}
