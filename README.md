@@ -27,7 +27,7 @@ replicas, all live over the last 30 minutes.
 
 ![Autoscaling: CPU per pod climbing under load, and the HPA scaling 2 → 8 replicas and back](docs/img/dashboard-autoscaling.png)
 
-## Local setup (Week 1-2)
+## Local setup
 
 ```bash
 # 1. App: install deps, run tests
@@ -66,7 +66,7 @@ helm install autoheal helm/autoheal-api
 curl -H "Host: autoheal.local" http://localhost:8080/healthz
 ```
 
-## Observability (Week 3)
+## Observability
 
 Run these once the cluster from the previous section is up. The values file trims
 retention and resources so the stack fits alongside kind on a laptop.
@@ -108,7 +108,7 @@ curl -s 'http://localhost:9090/api/v1/query?query=up{job="autoheal-api"}'
 | [observability/grafana-dashboard.json](observability/grafana-dashboard.json) | Dashboard: RED metrics, replicas, HPA, restarts, readiness, nodes |
 | [observability/alert-rules.yaml](observability/alert-rules.yaml) | Crash-loop, HPA-at-max, error-rate and PDB alerts |
 
-## Chaos scenarios (Week 4)
+## Chaos scenarios
 
 Each script asserts a pass condition and exits non-zero on failure. Measured
 results are in [docs/test-report.md](docs/test-report.md).
@@ -155,7 +155,7 @@ both replicas on the same node — the exact failure it was meant to prevent.
 `whenUnsatisfiable: ScheduleAnyway` is deliberate, so the HPA can still scale to
 8 replicas on a 2-worker cluster instead of leaving pods Pending.
 
-## Autoscaling (Week 5)
+## Autoscaling
 
 ```bash
 # 1. Metrics Server (kind needs --kubelet-insecure-tls; see kind/metrics-server-values.yaml)
@@ -204,7 +204,7 @@ cores of work. That saturates 2 pods (0.6 cores of limits) but fits within 8
 (2.4 cores), so p95 latency should recover once the app has scaled out. On a
 smaller laptop, lower `PEAK_VUS`.
 
-## Cloud: GKE and the Cluster Autoscaler (Week 6)
+## Cloud: GKE and the Cluster Autoscaler
 
 This part **costs money** from `gke-up` until `gke-down`. Run it in one sitting.
 
@@ -258,9 +258,9 @@ At list prices, a few hours of 2–4 e2-standard-2 nodes plus one load balancer
 comes to a few US dollars, usually covered by free-trial credits. Check current
 pricing before you start.
 
-## Cloud: OKE and the Cluster Autoscaler (Week 6, Oracle Cloud)
+## Cloud: OKE and the Cluster Autoscaler (Oracle Cloud)
 
-The same week-6 run on Oracle Cloud Infrastructure instead of GKE. Pick one;
+The same cloud run as above, on Oracle Cloud Infrastructure instead of GKE. Pick one;
 both use the same Helm chart, monitoring stack and chaos scripts. Defaults to
 OCI's **Always Free** shapes (2–4 × `VM.Standard.A1.Flex`, 1 OCPU/6GB each,
 one 10Mbps flexible load balancer), so a normal run of this **costs $0** —
