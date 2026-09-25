@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dummy-alert
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: dummy.rules
+      rules:
+        - alert: DummyTestAlert
+          expr: vector(1) > 0
+          for: 0m
+          labels:
+            severity: info
+          annotations:
+            summary: "Dummy test alert - always firing"
+            description: "This alert exists only to verify the Prometheus -> Alertmanager pipeline works. Delete once confirmed."

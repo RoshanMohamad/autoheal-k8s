@@ -233,27 +233,31 @@ At list prices, a few hours of 2–4 e2-standard-2 nodes plus one load balancer
 comes to a few US dollars, usually covered by free-trial credits. Check current
 pricing before you start.
 
-## Cloud: AKS and the Cluster Autoscaler (Week 6, Azure)
+## Cloud: OKE and the Cluster Autoscaler (Week 6, Oracle Cloud)
 
-The same week-6 run on Azure instead of GKE. Pick one; both use the same Helm
-chart, monitoring stack and chaos scripts. This **costs money** from `aks-up`
-until `aks-down`.
+The same week-6 run on Oracle Cloud Infrastructure instead of GKE. Pick one;
+both use the same Helm chart, monitoring stack and chaos scripts. Defaults to
+OCI's **Always Free** shapes (2–4 × `VM.Standard.A1.Flex`, 1 OCPU/6GB each,
+one 10Mbps flexible load balancer), so a normal run of this **costs $0** —
+see the sizing math and how to switch to a bigger, billed cluster below.
 
 One-time setup:
 
 ```bash
-# Install the Azure CLI: https://learn.microsoft.com/cli/azure/install-azure-cli
-az login
-az account set --subscription <SUBSCRIPTION_ID>   # if you have more than one
+# Install the OCI CLI: https://docs.oracle.com/iaas/Content/API/SDKDocs/cliinstall.htm
+oci setup config      # writes ~/.oci/config: tenancy, user, region, API key
 ```
 
 Run:
 
 ```bash
-# Resource group, AKS (Free tier, 2-4 x Standard_D2s_v5), ACR, image push,
-# ingress-nginx, monitoring stack, app. Optional: LOCATION=westeurope (default
-# eastus), BUDGET_EMAIL=you@example.com for a $10 budget alerting at 50/90/100%.
-make aks-up
+# VCN, OKE (2-4 Always Free A1.Flex nodes), OCIR image push (built for
+# arm64), ingress-nginx (capped at 10Mbps -- the Always Free LB ceiling),
+# cluster-autoscaler, monitoring stack, app. COMPARTMENT_OCID is required
+# (oci iam compartment list, or the tenancy OCID from ~/.oci/config for a
+# fresh account). Optional: LOCATION=eu-frankfurt-1 (default: the region in
+# ~/.oci/config).
+COMPARTMENT_OCID=<COMPARTMENT_OCID> make oke-up
 
 export BASE_URL=http://<LB_IP> K6_NETWORK=bridge   # up.sh prints the IP
 
@@ -261,34 +265,52 @@ make chaos-ca       # T9: pods Pending -> Cluster Autoscaler adds a node
 make load-spike     # T5/T6
 make chaos-all      # T1-T8
 
-make aks-down       # same day
+make oke-down       # same day
 ```
 
 | File | Purpose |
 |---|---|
-| [infra/aks/](infra/aks/) | Terraform: resource group, AKS with an autoscaling node pool (2-4), ACR with AcrPull for the kubelet identity, optional budget |
-| [infra/aks/up.sh](infra/aks/up.sh) / [down.sh](infra/aks/down.sh) | End-to-end bring-up and teardown |
-| [infra/aks/ci-setup.sh](infra/aks/ci-setup.sh) | One-time Entra ID app + GitHub OIDC federated credential for the `deploy-aks` CI job |
+| [infra/oke/](infra/oke/) | Terraform: VCN (public subnets for the k8s API, nodes and load balancer), OKE cluster, one node pool |
+| [infra/oke/up.sh](infra/oke/up.sh) / [down.sh](infra/oke/down.sh) | End-to-end bring-up and teardown, including the Kubernetes `cluster-autoscaler` (OCI has no built-in min/max toggle like AKS/GKE) |
+| [infra/oke/ci-setup.sh](infra/oke/ci-setup.sh) | One-time IAM user + API key for the `deploy-oke` CI job, and a dynamic group + policy so the autoscaler can resize the node pool via instance-principal auth |
 
-AKS-specific details:
-- **vCPU quota.** Student and trial subscriptions often allow only 4–6 vCPUs per
-  region, while 4 nodes need 8. `up.sh` checks this first and warns; if T9 cannot
-  add a node, request a quota increase, use another `LOCATION`, or set
-  `MAX_NODES=3`.
-- **Load balancer health probe.** Azure probes `/` on ingress-nginx by default,
-  gets a 404 and drops all traffic. `up.sh` points the probe at `/healthz`.
-- **Cleanup.** The load balancer, public IP, VMs and disks live in the node
-  resource group (`MC_autoheal-rg_autoheal_<location>`), which Azure deletes with
-  the cluster. `down.sh` still checks both resource groups and lists any leftover
-  public IPs or disks.
-- Cost controls: Free-tier control plane (no hourly fee), `max_nodes = 4`, and an
-  autoscaler profile that removes idle nodes after 5 minutes instead of 10.
+OKE-specific details:
+- **No OIDC federation.** Unlike Azure/GCP, OCI has no workload-identity
+  federation simple enough for GitHub Actions here, so `deploy-oke` uses the
+  API signing key `ci-setup.sh` creates instead of `id-token: write`.
+- **Cluster Autoscaler is a Helm install, not a cluster toggle.** `up.sh`
+  deploys `kubernetes/autoscaler`'s OCI provider, pointed at the node pool's
+  OCID with `--nodes=min:max:poolID`. It authenticates as the node's own
+  instance principal, which `ci-setup.sh`'s dynamic group + policy grants.
+- **metrics-server isn't preinstalled**, unlike AKS/GKE; `up.sh` installs it.
+- **Always Free sizing.** `node_ocpus x max_nodes` must stay ≤ 4 and
+  `node_memory_gbs x max_nodes` ≤ 24 (the Ampere allowance is per-tenancy,
+  not per-cluster); `boot_volume_size_in_gbs x max_nodes` must stay under the
+  200GB block-storage allowance. The defaults (1 OCPU / 6GB / 50GB boot, 4
+  nodes max) land exactly at the OCPU and memory ceilings with zero headroom
+  in either dimension — lower `MAX_NODES` first if a create fails on quota.
+  `up.sh` detects the arm64 shape from Terraform's output and builds the app
+  image for `linux/arm64` with `docker buildx` automatically; needs Docker
+  Desktop or a buildx builder with the QEMU emulator on an x86 laptop.
+- **A1.Flex capacity varies by region/AD.** "Out of host capacity" on
+  `terraform apply` is common for the free Ampere shape; retry, or try
+  another `LOCATION`.
+- **Bigger, billed cluster:** `NODE_SHAPE=VM.Standard.E4.Flex NODE_OCPUS=1
+  NODE_MEMORY_GBS=8 LB_BANDWIDTH_MBPS=100 COMPARTMENT_OCID=<...> make oke-up`
+  switches to AMD nodes and a faster load balancer (trial credits or a paid
+  account only — the Always Free shapes don't apply to E4.Flex).
+- **Cleanup.** The OCI Load Balancer behind ingress-nginx is created by
+  Kubernetes, not Terraform, so `down.sh` removes it first, then lists any
+  leftover load balancers, instances or public IPs in the compartment.
+- Cost controls: `max_nodes = 4`, a single public VCN (no NAT gateway to pay
+  for), and the Cluster Autoscaler's own scale-down-unneeded default.
 
-CI deploy (optional): run `GITHUB_REPO=<owner>/<repo> bash infra/aks/ci-setup.sh`,
-bring the cluster up with `CI_PRINCIPAL_ID=<printed id> make aks-up`, and add the
-printed repository variables. Pushes to `main` then roll the Trivy-scanned image
-out to AKS. Terraform grants the CI identity access to only this registry and
-cluster, so it has no access while the cluster is down.
+CI deploy (optional): run `COMPARTMENT_OCID=<COMPARTMENT_OCID> bash
+infra/oke/ci-setup.sh`, bring the cluster up with `make oke-up`, and add the
+printed repository secrets/variables. Pushes to `main` then roll the
+Trivy-scanned image out to OKE. Terraform grants the CI group access to only
+this compartment's registry and cluster, so it has no access while the
+cluster is down.
 
 ## Endpoints
 
