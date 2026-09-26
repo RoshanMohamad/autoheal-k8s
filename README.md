@@ -10,7 +10,7 @@ loop, flips readiness, ships a broken rollout, and drains a node; scripted load
 (`observability/`) turns each recovery or scaling event into a live Grafana
 dashboard and Prometheus alerts, so the claim "it self-heals and autoscales" is
 measured, not asserted. It runs locally on `kind`, and the same Helm chart
-deploys to GKE or OKE for the Cluster Autoscaler test (T9). See
+deploys to OKE (Oracle Cloud) for the Cluster Autoscaler test (T9). See
 [docs/test-report.md](docs/test-report.md) for each scenario's expected vs.
 observed result.
 
@@ -204,65 +204,13 @@ cores of work. That saturates 2 pods (0.6 cores of limits) but fits within 8
 (2.4 cores), so p95 latency should recover once the app has scaled out. On a
 smaller laptop, lower `PEAK_VUS`.
 
-## Cloud: GKE and the Cluster Autoscaler
 
-This part **costs money** from `gke-up` until `gke-down`. Run it in one sitting.
-
-One-time setup:
-
-```bash
-# Install the Google Cloud CLI: https://cloud.google.com/sdk/docs/install
-gcloud components install gke-gcloud-auth-plugin
-gcloud auth login
-gcloud auth application-default login      # credentials Terraform uses
-gcloud config set project <PROJECT_ID>     # a project with billing enabled
-```
-
-Run:
-
-```bash
-# Cluster (zonal, 2-4 x e2-standard-2), registry, image push, ingress-nginx,
-# monitoring stack, app. Add BILLING_ACCOUNT=... to also create a $10 budget
-# with email alerts at 50/90/100%.
-PROJECT_ID=<PROJECT_ID> make gke-up
-
-# Point k6 at the cloud load balancer (up.sh prints the IP)
-export BASE_URL=http://<LB_IP> K6_NETWORK=bridge
-
-make chaos-ca       # T9: pods Pending -> Cluster Autoscaler adds a node
-make load-spike     # T5/T6 on real nodes
-make chaos-all      # T1-T8, now with the monitoring stack running
-
-# Grafana screenshots of each test window
-bash observability/snapshot.sh load/results/<run>-windows.tsv docs/img
-
-PROJECT_ID=<PROJECT_ID> make gke-down       # same day
-```
-
-| File | Purpose |
-|---|---|
-| [infra/gke/](infra/gke/) | Terraform: zonal cluster, autoscaling node pool (2-4), Artifact Registry, least-privilege node service account, optional budget |
-| [infra/gke/up.sh](infra/gke/up.sh) / [down.sh](infra/gke/down.sh) | End-to-end bring-up and teardown |
-| [chaos/t9-cluster-autoscaler.sh](chaos/t9-cluster-autoscaler.sh) | T9: raises each pod's CPU request to 500m and pins the HPA at 8, then times Pending → new node → all Ready, and restores |
-
-Cost controls:
-- A **zonal** cluster, because GKE's free tier covers one zonal control plane.
-- `max_nodes = 4` hard-caps the Cluster Autoscaler.
-- The `OPTIMIZE_UTILIZATION` autoscaler profile removes idle nodes sooner.
-- `down.sh` deletes ingress-nginx *before* the cluster. Its load balancer was
-  created by Kubernetes, not Terraform, so `terraform destroy` alone can leave it
-  behind and still billing. The script then lists any leftover forwarding rules,
-  IP addresses or disks.
-
-At list prices, a few hours of 2–4 e2-standard-2 nodes plus one load balancer
-comes to a few US dollars, usually covered by free-trial credits. Check current
-pricing before you start.
 
 ## Cloud: OKE and the Cluster Autoscaler (Oracle Cloud)
 
-The same cloud run as above, on Oracle Cloud Infrastructure instead of GKE. Pick one;
-both use the same Helm chart, monitoring stack and chaos scripts. Defaults to
-OCI's **Always Free** shapes (2–4 × `VM.Standard.A1.Flex`, 1 OCPU/6GB each,
+The cloud run of T9 (Cluster Autoscaler adding a node under pending pods),
+on Oracle Kubernetes Engine, using the same Helm chart, monitoring stack and
+chaos scripts as the local `kind` setup above. Defaults to OCI's **Always Free** shapes (2–4 × `VM.Standard.A1.Flex`, 1 OCPU/6GB each,
 one 10Mbps flexible load balancer), so a normal run of this **costs $0** —
 see the sizing math and how to switch to a bigger, billed cluster below.
 
